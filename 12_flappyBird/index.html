@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Flappy Bird Avançado</title>
+  <style>
+    canvas {
+      border: 2px solid #333;
+      display: block;
+      margin: 0 auto;
+      background: linear-gradient(to bottom, #87CEEB, #4682B4);
+    }
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      font-family: Arial, sans-serif;
+      background: #f0f0f0;
+    }
+    #scoreDisplay {
+      font-size: 24px;
+      margin: 10px 0;
+      color: #333;
+    }
+    #highScoreDisplay {
+      font-size: 20px;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <div id="scoreDisplay">Pontuação: 0</div>
+  <div id="highScoreDisplay">Recorde: 0</div>
+  <canvas id="gameCanvas" width="400" height="600"></canvas>
+
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreDisplay = document.getElementById('scoreDisplay');
+    const highScoreDisplay = document.getElementById('highScoreDisplay');
+
+    // Variáveis do jogo
+    let bird = {
+      x: 50,
+      y: canvas.height / 2,
+      radius: 20,
+      velocity: 0,
+      gravity: 0.5,
+      jump: -10,
+      rotation: 0
+    };
+    let pipes = [];
+    let score = 0;
+    let highScore = 0;
+    let gameOver = false;
+    let frameCount = 0;
+    const pipeGap = 150;
+    const pipeWidth = 50;
+    const pipeSpeed = 2;
+
+    // Imagens (simuladas com drawImage ou formas geométricas)
+    const birdImage = new Image();
+    birdImage.src = 'https://i.imgur.com/8xXvX9Q.png'; // Substitua por uma URL de sprite de pássaro
+
+    // Inicialização do SQLite
+    async function initDatabase() {
+      try {
+        await window.sqlite.run(`
+          CREATE TABLE IF NOT EXISTS flappy_scores (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            score INTEGER
+          );
+        `);
+        console.log("Tabela 'flappy_scores' criada ou já existe.");
+        await loadHighScore();
+      } catch (error) {
+        console.error("Erro ao inicializar o banco:", error);
+      }
+    }
+
+    async function loadHighScore() {
+      try {
+        const rows = await window.sqlite.all("SELECT MAX(score) as highScore FROM flappy_scores");
+        highScore = rows[0]?.highScore || 0;
+        highScoreDisplay.textContent = `Recorde: ${highScore}`;
+      } catch (error) {
+        console.error("Erro ao carregar recorde:", error);
+      }
+    }
+
+    async function saveScore() {
+      try {
+        await window.sqlite.run("INSERT INTO flappy_scores (score) VALUES (?)", [score]);
+        if (score > highScore) {
+          highScore = score;
+          highScoreDisplay.textContent = `Recorde: ${highScore}`;
+        }
+      } catch (error) {
+        console.error("Erro ao salvar pontuação:", error);
+      }
+    }
+
+    // Funções do jogo
+    function spawnPipe() {
+      const height = Math.random() * (canvas.height - pipeGap - 100) + 50;
+      pipes.push({
+        x: canvas.width,
+        topHeight: height,
+        bottomHeight: canvas.height - height - pipeGap,
+        passed: false
+      });
+    }
+
+    function drawBird() {
+      ctx.save();
+      ctx.translate(bird.x, bird.y);
+      ctx.rotate(bird.rotation * Math.PI / 180);
+      if (birdImage.complete) {
+        ctx.drawImage(birdImage, -bird.radius, -bird.radius, bird.radius * 2, bird.radius * 2);
+      } else {
+        ctx.beginPath();
+        ctx.arc(0, 0, bird.radius, 0, Math.PI * 2);
+        ctx.fillStyle = 'yellow';
+        ctx.fill();
+        ctx.closePath();
+      }
+      ctx.restore();
+    }
+
+    function drawPipes() {
+      pipes.forEach(pipe => {
+        // Top pipe
+        ctx.fillStyle = 'green';
+        ctx.fillRect(pipe.x, 0, pipeWidth, pipe.topHeight);
+        ctx.fillStyle = 'darkgreen';
+        ctx.fillRect(pipe.x - 5, pipe.topHeight - 20, pipeWidth + 10, 20);
+
+        // Bottom pipe
+        ctx.fillStyle = 'green';
+        ctx.fillRect(pipe.x, canvas.height - pipe.bottomHeight, pipeWidth, pipe.bottomHeight);
+        ctx.fillStyle = 'darkgreen';
+        ctx.fillRect(pipe.x - 5, canvas.height - pipe.bottomHeight, pipeWidth + 10, 20);
+      });
+    }
+
+    function updateBird() {
+      bird.velocity += bird.gravity;
+      bird.y += bird.velocity;
+      bird.rotation = Math.min(Math.max(bird.velocity * 2, -45), 45);
+
+      if (bird.y + bird.radius > canvas.height || bird.y - bird.radius < 0) {
+        gameOver = true;
+      }
+    }
+
+    function updatePipes() {
+      pipes.forEach(pipe => {
+        pipe.x -= pipeSpeed;
+        if (pipe.x + pipeWidth < bird.x && !pipe.passed) {
+          pipe.passed = true;
+          score++;
+          scoreDisplay.textContent = `Pontuação: ${score}`;
+        }
+      });
+      pipes = pipes.filter(pipe => pipe.x + pipeWidth > 0);
+
+      if (frameCount % 90 === 0) spawnPipe();
+    }
+
+    function checkCollision() {
+      pipes.forEach(pipe => {
+        if (
+          bird.x + bird.radius > pipe.x &&
+          bird.x - bird.radius < pipe.x + pipeWidth &&
+          (bird.y - bird.radius < pipe.topHeight || bird.y + bird.radius > canvas.height - pipe.bottomHeight)
+        ) {
+          gameOver = true;
+        }
+      });
+    }
+
+    function gameLoop() {
+      if (gameOver) {
+        saveScore();
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = 'white';
+        ctx.font = '40px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('Game Over', canvas.width / 2, canvas.height / 2 - 20);
+        ctx.font = '20px Arial';
+        ctx.fillText('Pressione ESPAÇO para reiniciar', canvas.width / 2, canvas.height / 2 + 20);
+        return;
+      }
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      frameCount++;
+
+      updateBird();
+      updatePipes();
+      checkCollision();
+
+      drawPipes();
+      drawBird();
+
+      requestAnimationFrame(gameLoop);
+    }
+
+    // Controles
+    document.addEventListener('keydown', (e) => {
+      if (e.code === 'Space') {
+        if (gameOver) {
+          bird.y = canvas.height / 2;
+          bird.velocity = 0;
+          bird.rotation = 0;
+          pipes = [];
+          score = 0;
+          gameOver = false;
+          scoreDisplay.textContent = `Pontuação: ${score}`;
+          gameLoop();
+        } else {
+          bird.velocity = bird.jump;
+        }
+      }
+    });
+
+    // Iniciar o jogo
+    initDatabase().then(() => {
+      spawnPipe();
+      gameLoop();
+    });
+  </script>
+</body>
+</html>
